@@ -6,6 +6,7 @@
 #include <vector>
 #include <iostream>
 
+
 // class templates, nested classes, variadic templates, perfect forwarding, placement new, alignment, RAII and move semantics
 
 /*
@@ -59,23 +60,26 @@ public:
     // Creates a Pool::Object containing
     // a pre-allocated object, using the constructor with parameters
     // as defined by TArgs definition.
+	/* if no slot is left pool doubles its size, based on first resize call's value */
     template<typename ... TArgs>
     Object acquire(TArgs&&... p_args) {
-        /*
-        - i gotta use constructor of Object class
-        - i gotta use std::forward<TArgs>(p_args)
-        - to pass args as they were passed to me i gotta use std::forward
-        */
-		TType* userObj = nullptr;
-        for (Node& node: this->poolArena) {
-            if (node.isFree) {
-                userObj = new (node.data) TType(std::forward<TArgs>(p_args)...);
-				Object obj = Object(userObj);
-				return obj;
-            }
-        }
-
-       return ;
+		/*
+		- i gotta use constructor of Object class
+		- i gotta use std::forward<TArgs>(p_args)
+		- to pass args as they were passed to me i gotta use std::forward
+		*/
+		auto	freeNode = [&] () -> Node& {
+			for (Node& node: this->poolArena) {
+				if (node.isFree) {
+					return node;
+				}
+			}
+			this->resize(this->poolArena.capacity() * 2);
+			return this->poolArena[this->poolArena.size()];
+		};
+		Node&	node = freeNode();
+		TType*	userObj = new (node.data) TType(std::forward<TArgs>(p_args)...);
+		return Object(userObj);
     }
 
 /* -------------------------------------------------------------------------- */
@@ -94,12 +98,20 @@ public:
         - nullptr objects pointers in this pool
         - assign objects of other to this
         */
+	   this->poolArena = other.poolArena;
+	   other.poolArena.erase(other.poolArena.begin(), other.poolArena.end());
     }
     Pool&   operator=(Pool&& other){
-        
+		if (this != &other) {
+			this->poolArena = other.poolArena;
+			other.poolArena.erase(other.poolArena.begin(), other.poolArena.end());
+		}
         return *this;
     }
     ~Pool(){
+		// for (Node& node: this->poolArena) {
+			// this->poolArena.~vector();
+		// }
         std::cout << "Pool destructor called" << std::endl;
         /*
         -  dealocate all memory allocated fo TType object
@@ -130,10 +142,8 @@ public:
             TType   *ptr;
            
         //    template<typename ... TArgs>
-           Object(TType *obj): ptr(nullptr) {
+           Object(TType *obj): ptr(obj) {
 			
-			this->ptr = obj;
-
            /*
            - i gotta build the object in the pre-allocated
                memory, for that i gotta use new placement syntax would
@@ -186,6 +196,7 @@ public:
             }
             ~Object(){
                 std::cout << "Object destructor called" << std::endl;
+				this->ptr->~TType();
             /*
             - i gotta called destructor of TType object explicitly (RAII)
             - nullptr the raw ptr of this object
