@@ -29,12 +29,14 @@ private:
     - this vector may actually be the pool, and number of object in it
     and resize method would call it to resize it
     */
-    struct Node {
+	friend class						Object;
+
+	struct Node {
         alignas(TType) unsigned char    data[sizeof(TType)];
-        bool                            isFree;
+        bool                            isFree = true;
     };
 
-    std::vector<Node> poolArena;
+    std::vector<Node>					poolArena;
 
 
 /* -------------------------------------------------------------------------- */
@@ -60,7 +62,9 @@ public:
     // Creates a Pool::Object containing
     // a pre-allocated object, using the constructor with parameters
     // as defined by TArgs definition.
-	/* if no slot is left pool doubles its size, based on first resize call's value */
+	/* if no slot is left pool doubles its size, based on first resize call's value.
+		Note: Intial size = 1
+	*/
     template<typename ... TArgs>
     Object acquire(TArgs&&... p_args) {
 		/*
@@ -74,12 +78,13 @@ public:
 					return node;
 				}
 			}
-			this->resize(this->poolArena.capacity() * 2);
+			int n = this->poolArena.capacity() > 0 ? 1 : this->poolArena.capacity();
+			this->resize(n * 2);
 			return this->poolArena[this->poolArena.size()];
 		};
 		Node&	node = freeNode();
 		TType*	userObj = new (node.data) TType(std::forward<TArgs>(p_args)...);
-		return Object(userObj);
+		return Object(node, userObj);
     }
 
 /* -------------------------------------------------------------------------- */
@@ -92,30 +97,24 @@ public:
     }
     Pool(Pool&  other) = delete;
     Pool&   operator=(Pool& other) = delete;
+	/*
+	- check not this object
+	- nullptr objects pointers in this pool
+	- assign objects of other to this
+	*/
     Pool(Pool&& other){
-        /*
-        - check not this object
-        - nullptr objects pointers in this pool
-        - assign objects of other to this
-        */
-	   this->poolArena = other.poolArena;
+	   this->poolArena = std::move(other.poolArena);
 	   other.poolArena.erase(other.poolArena.begin(), other.poolArena.end());
     }
     Pool&   operator=(Pool&& other){
 		if (this != &other) {
-			this->poolArena = other.poolArena;
+			this->poolArena = std::move(other.poolArena);
 			other.poolArena.erase(other.poolArena.begin(), other.poolArena.end());
 		}
         return *this;
     }
     ~Pool(){
-		// for (Node& node: this->poolArena) {
-			// this->poolArena.~vector();
-		// }
-        std::cout << "Pool destructor called" << std::endl;
-        /*
-        -  dealocate all memory allocated fo TType object
-        */
+	  std::cout << "Pool destructor called" << std::endl;
     }
 
 /* -------------------------------------------------------------------------- */
@@ -140,32 +139,22 @@ public:
             friend class Pool<TType>;
 
             TType   *ptr;
-           
+			Node	objNode;
         //    template<typename ... TArgs>
-           Object(TType *obj): ptr(obj) {
-			
-           /*
-           - i gotta build the object in the pre-allocated
-               memory, for that i gotta use new placement syntax would
-               look like: this->ptr = new (buffer) TType(Args...) 
-           - cause object passed as arg is alread
-           - i gotta use std::forward<TArgs>(p_args)
-           - i gotta update size of pool (increase it)
-           */
-           }
+		/*
+		- i gotta build the object in the pre-allocated
+			memory, for that i gotta use new placement syntax would
+			look like: this->ptr = new (buffer) TType(Args...) 
+		- cause object passed as arg is alread
+		- i gotta use std::forward<TArgs>(p_args)
+		- i gotta update size of pool (increase it)
+		*/
+           Object(Node& objNode, TType *obj): ptr(obj), objNode(objNode) {}
 
 /* -------------------------------------------------------------------------- */
 /*                           Object Public Members                            */
 /* -------------------------------------------------------------------------- */
         public:
-/* -------------------------------------------------------------------------- */
-/*                            Operator Overloading                            */
-/* -------------------------------------------------------------------------- */
-            // Returns the pointer stored withing the Pool::Object
-            TType* operator -> () {
-                return this->ptr;
-            }
-
 /* -------------------------------------------------------------------------- */
 /*                            Object Rule Of Five                             */
 /* -------------------------------------------------------------------------- */
@@ -179,31 +168,50 @@ public:
             - Every requests and releases of a pre-allocated objects must be
                 handled by Pool::Object, not by the user 
             */
-            Object(Object&& ){
+		   /*
+		   - move operations would allow me to change ownership of an 
+			   object between pool and user without destructing Pool memory
+			   so it is ready for next object to acquire it 
+		   */
+            Object(Object&& other){
+				this->objNode = std::move(other.objNode);
+				this->ptr = std::move(other.ptr);
+				other.objNode = nullptr;
+				other.ptr = nullptr;
+			}
             /*
             - move operations would allow me to change ownership of an 
                 object between pool and user without destructing Pool memory
                 so it is ready for next object to acquire it 
             */
+            Object&   operator=(Object&& other){
+				if (this != &other) {
+					this->objNode = std::move(other.objNode);
+					this->ptr = std::move(other.ptr);
+					other.objNode = nullptr;
+					other.ptr = nullptr;
+				}
+				return *this;
             }
-            Object&   operator=(Object&& ){
-            /*
-            - move operations would allow me to change ownership of an 
-                object between pool and user without destructing Pool memory
-                so it is ready for next object to acquire it 
-            */
-                return *this;
-            }
+			/*
+			- i gotta called destructor of TType object explicitly (RAII)
+			- nullptr the raw ptr of this object
+			- i gotta update size of pool (decrease it)
+			- release the slot
+			*/
             ~Object(){
-                std::cout << "Object destructor called" << std::endl;
 				this->ptr->~TType();
-            /*
-            - i gotta called destructor of TType object explicitly (RAII)
-            - nullptr the raw ptr of this object
-            - i gotta update size of pool (decrease it)
-            - release the slot
-            */
+				this->objNode.isFree = true;
+                std::cout << "Object destructor called" << std::endl;
             }
+/* -------------------------------------------------------------------------- */
+/*                            Operator Overloading                            */
+/* -------------------------------------------------------------------------- */
+            // Returns the pointer stored withing the Pool::Object
+            TType* operator -> () {
+                return this->ptr;
+            }
+
     };
 };
 
