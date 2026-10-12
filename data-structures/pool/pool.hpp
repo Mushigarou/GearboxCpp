@@ -1,11 +1,10 @@
 #ifndef POOL_HPP
 #define POOL_HPP
 
-#include "resize.cpp"
 #include <new>
 #include <vector>
 #include <iostream>
-
+#include <memory>
 
 // class templates, nested classes, variadic templates, perfect forwarding, placement new, alignment, RAII and move semantics
 
@@ -36,7 +35,7 @@ private:
         bool                            isFree = true;
     };
 
-    std::vector<Node>					poolArena;
+    std::vector<std::unique_ptr<Node>>					poolArena;
 
 
 /* -------------------------------------------------------------------------- */
@@ -72,18 +71,18 @@ public:
 		- i gotta use std::forward<TArgs>(p_args)
 		- to pass args as they were passed to me i gotta use std::forward
 		*/
-		auto	freeNode = [&] () -> Node& {
-			for (Node& node: this->poolArena) {
-				if (node.isFree) {
+		auto	freeNode = [&] () -> std::unique_ptr<Node>& {
+			for (std::unique_ptr<Node>& node: this->poolArena) {
+				if (node->isFree) {
 					return node;
 				}
 			}
-			int n = this->poolArena.capacity() > 0 ? 1 : this->poolArena.capacity();
+			int n = (this->poolArena.capacity() == 0) ? 1 : this->poolArena.capacity();
 			this->resize(n * 2);
-			return this->poolArena[this->poolArena.size()];
+			return (this->poolArena[this->poolArena.size()]);
 		};
-		Node&	node = freeNode();
-		TType*	userObj = new (node.data) TType(std::forward<TArgs>(p_args)...);
+		std::unique_ptr<Node>&	node = freeNode();
+		TType*	userObj = new (node->data) TType(std::forward<TArgs>(p_args)...);
 		return Object(node, userObj);
     }
 
@@ -130,26 +129,11 @@ public:
 /*                           Object Private Members                           */
 /* -------------------------------------------------------------------------- */
         private:
-            /*
-            - this can be a smart pointer, like a unique_ptr to automatically
-                managing it's dealocation, but what if user wanna share same 
-                object with different pointers, in that case we gotta use
-                shared_ptr
-            */
-            friend class Pool<TType>;
+			friend class Pool<TType>;
 
-            TType   *ptr;
-			Node	objNode;
-        //    template<typename ... TArgs>
-		/*
-		- i gotta build the object in the pre-allocated
-			memory, for that i gotta use new placement syntax would
-			look like: this->ptr = new (buffer) TType(Args...) 
-		- cause object passed as arg is alread
-		- i gotta use std::forward<TArgs>(p_args)
-		- i gotta update size of pool (increase it)
-		*/
-           Object(Node& objNode, TType *obj): ptr(obj), objNode(objNode) {}
+			TType   *ptr;
+			std::unique_ptr<Node>&	objNode;
+			Object(std::unique_ptr<Node>& objNode, TType *ptr): ptr(ptr), objNode(objNode) {}
 
 /* -------------------------------------------------------------------------- */
 /*                           Object Public Members                            */
@@ -201,7 +185,7 @@ public:
 			*/
             ~Object(){
 				this->ptr->~TType();
-				this->objNode.isFree = true;
+				this->objNode->isFree = true;
                 std::cout << "Object destructor called" << std::endl;
             }
 /* -------------------------------------------------------------------------- */
