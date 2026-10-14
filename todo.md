@@ -25,10 +25,16 @@
 - [ ] Object constructor: the parameter type and the `objNode(objNode)` init both follow from the ownership decision
 
 ## Pool — logic
-- [ ] `resize` only calls `reserve` → no Node is ever created, `size()` stays 0, the loop never runs
-  - Which call actually creates a Node in a `unique_ptr`?
+- [x] `resize` uses `vector::resize` → `size()` grows, elements really exist
+- [ ] …but those elements are **empty** `unique_ptr`s → no Node. Who should give each one a Node: `resize` or `acquire`?
+- [ ] 🐞 **Same slot handed out twice** (your output `heeloos heeloos`; with long strings ASan → double-free)
+  - `if (pool[i])` asks "does this slot have a Node?" — not "is it free?" Where did `isFree` go?
+  - Walk the loop by hand for 2 acquires on a `Pool(5)`: which `i` do you get each time?
+  - `push_back` inside a loop over the same vector: how many Nodes does each acquire add? Print `size()`
+  - Nodes created in `acquire` → is the pool still *pre*-allocated?
+  - Split jobs: `resize` = make slots real · `acquire` = find a free one, mark it taken (grow only if none)
 - [x] Line 80: ternary fixed
-- [ ] `poolArena[size()]` is one past the end. After growing, which index is the first *new* Node?
+- [ ] When growing: which index is the first *new* Node?
 - [ ] `resize` to a **smaller** number while slots are in use: what should happen? Decide + document
 - [ ] `resize` error: `cerr` + `return` means the caller can't tell it failed. Read: exceptions (`std::length_error`)
 - [ ] Pool destroyed while Objects are still alive: what do their Node pointers point to? Decide + document
@@ -45,8 +51,10 @@
 - [ ] `std::move` an Object into another, use the new one, old one's destructor doesn't crash
 - [ ] Acquire **more** than the resize count → growth → earlier Objects still valid
 - [ ] A test class with no default ctor, several ctors, and prints in ctor/dtor (count them!)
-- [ ] `Pool<int>`, `Pool<std::string>`
-- [ ] Zero leaks, zero ASan errors, also with `-D_GLIBCXX_ASSERTIONS` (add it to `make debug`)
+- [x] `Pool<std::pair>`, `Pool<std::vector<int>>`, `Pool<std::string>` in separate functions
+- [ ] Use **long** strings (> 15 chars) in tests — read: *small string optimization* (why short ones hid the bug)
+- [x] `-D_GLIBCXX_ASSERTIONS` added (`make bug`)
+- [ ] Zero leaks, zero ASan errors under `make bug`
 
 ## Cleanup
 - [ ] ⚠️ `.gitignore` ignores `Makefile` → it's **not tracked** and won't be submitted

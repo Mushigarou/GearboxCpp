@@ -55,35 +55,34 @@ public:
             << " exceeds maximum allowable container size.\n";
             return;
         }
-        this->poolArena.reserve(numberOfObjectStored);
+        this->poolArena.resize(numberOfObjectStored);
+        // std::cout << this->poolArena.capacity() << std::endl;
     }
     
     // Creates a Pool::Object containing
     // a pre-allocated object, using the constructor with parameters
     // as defined by TArgs definition.
-	/* if no slot is left pool doubles its size, based on first resize call's value.
-		Note: Intial size = 1
+	/* if no slot is left pool doubles its size
 	*/
     template<typename ... TArgs>
     Object acquire(TArgs&&... p_args) {
-		/*
-		- i gotta use constructor of Object class
-		- i gotta use std::forward<TArgs>(p_args)
-		- to pass args as they were passed to me i gotta use std::forward
-		*/
-		auto	freeNode = [&] () -> std::unique_ptr<Node>& {
-			for (std::unique_ptr<Node>& node: this->poolArena) {
-				if (node->isFree) {
-					return node;
-				}
-			}
-			int n = (this->poolArena.capacity() == 0) ? 1 : this->poolArena.capacity();
-			this->resize(n * 2);
-			return (this->poolArena[this->poolArena.size()]);
-		};
-		std::unique_ptr<Node>&	node = freeNode();
-		TType*	userObj = new (node->data) TType(std::forward<TArgs>(p_args)...);
-		return Object(node, userObj);
+        std::vector<std::unique_ptr<Pool<TType>::Node>>& pool = this->poolArena;
+      
+        // if (pool.size() == pool.capacity()) {
+        //     const size_t capacity = pool.capacity() == 0 ? 4 : (pool.capacity() * 2);
+        //     pool.resize(capacity);
+        // }
+
+        size_t i = 0;
+        for (; i < pool.size(); i++) {
+            if (pool[i]) {
+                break;
+            }
+            pool.push_back(std::make_unique<Node>());
+        }
+        
+        TType*	userObj = new (pool[i]->data) TType(std::forward<TArgs>(p_args)...);
+        return Object(pool[i], userObj);
     }
 
 /* -------------------------------------------------------------------------- */
@@ -96,16 +95,11 @@ public:
     }
     Pool(Pool&  other) = delete;
     Pool&   operator=(Pool& other) = delete;
-	/*
-	- check not this object
-	- nullptr objects pointers in this pool
-	- assign objects of other to this
-	*/
-    Pool(Pool&& other){
+    Pool(Pool&& other) noexcept {
 	   this->poolArena = std::move(other.poolArena);
 	   other.poolArena.erase(other.poolArena.begin(), other.poolArena.end());
     }
-    Pool&   operator=(Pool&& other){
+    Pool&   operator=(Pool&& other) noexcept {
 		if (this != &other) {
 			this->poolArena = std::move(other.poolArena);
 			other.poolArena.erase(other.poolArena.begin(), other.poolArena.end());
@@ -157,7 +151,7 @@ public:
 			   object between pool and user without destructing Pool memory
 			   so it is ready for next object to acquire it 
 		   */
-            Object(Object&& other){
+            Object(Object&& other) noexcept {
 				this->objNode = std::move(other.objNode);
 				this->ptr = std::move(other.ptr);
 				other.objNode = nullptr;
@@ -168,7 +162,7 @@ public:
                 object between pool and user without destructing Pool memory
                 so it is ready for next object to acquire it 
             */
-            Object&   operator=(Object&& other){
+            Object&   operator=(Object&& other) noexcept {
 				if (this != &other) {
 					this->objNode = std::move(other.objNode);
 					this->ptr = std::move(other.ptr);
@@ -185,7 +179,7 @@ public:
 			*/
             ~Object(){
 				this->ptr->~TType();
-				this->objNode->isFree = true;
+				// this->objNode->isFree = true;
                 std::cout << "Object destructor called" << std::endl;
             }
 /* -------------------------------------------------------------------------- */

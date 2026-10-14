@@ -14,7 +14,9 @@ HEADER_FLAG = "-Iinclude"
 OBJ_DIR = obj
 
 RM = rm -rf
-# -D_GLIBCXX_ASSERTIONS
+
+bug:
+	@c++ -Wall -Werror -Wextra -g -fsanitize=address -D_GLIBCXX_ASSERTIONS  --std=c++20 main.cpp && ASAN_OPTIONS=detect_stack_use_after_return=1 ./a.out
 debug:
 	@c++ -Wall -Werror -Wextra -g -fsanitize=address  --std=c++20 main.cpp && ASAN_OPTIONS=detect_stack_use_after_return=1 ./a.out
 run:
