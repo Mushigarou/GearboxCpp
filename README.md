@@ -1,2 +1,2 @@
-# libftpp
+# GearboxCpp
 Advanced C++ concepts through the development of complex tools and systems.

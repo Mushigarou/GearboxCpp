@@ -16,7 +16,9 @@
 
 ## Pool — compile blockers (do these first)
 - [x] **Line 84:** `node` is now a reference (no more unique_ptr copy)
-- [ ] **Ownership:** Object now holds `std::unique_ptr<Node>&` — a reference to the pool's *unique_ptr*, not to the Node.
+- [ ] **Release:** Object only stores `ptr` → can't mark its slot free. The old `unique_ptr<Node>&` gave heap-use-after-free (freed by `p.resize(10)`).
+  - What moved during `resize(10)`: the Node, or the `unique_ptr`? Point at the one that doesn't move.
+  - You once wrote `Node* no = node.get();` — what kind of pointer is that?
   - The unique_ptr lives in the vector's buffer → does it move when the vector grows? Does the Node?
   - Can a reference member be re-pointed? What does `objNode = std::move(...)` / `objNode = nullptr` do to the **pool's** entry?
   - Move ctor has no init list → a reference member must be initialized (error appears once it's used)
@@ -26,8 +28,8 @@
 
 ## Pool — logic
 - [x] `resize` uses `vector::resize` → `size()` grows, elements really exist
-- [ ] …but those elements are **empty** `unique_ptr`s → no Node. Who should give each one a Node: `resize` or `acquire`?
-- [ ] 🐞 **Same slot handed out twice** (your output `heeloos heeloos`; with long strings ASan → double-free)
+- [x] `resize` gives every empty element a Node (and keeps existing ones when growing)
+- [x] 🐞 **Same slot handed out twice** — fixed: `acquire` checks `isFree` and marks it taken (your output `heeloos heeloos`; with long strings ASan → double-free)
   - `if (pool[i])` asks "does this slot have a Node?" — not "is it free?" Where did `isFree` go?
   - Walk the loop by hand for 2 acquires on a `Pool(5)`: which `i` do you get each time?
   - `push_back` inside a loop over the same vector: how many Nodes does each acquire add? Print `size()`
@@ -35,12 +37,15 @@
   - Split jobs: `resize` = make slots real · `acquire` = find a free one, mark it taken (grow only if none)
 - [x] Line 80: ternary fixed
 - [ ] When growing: which index is the first *new* Node?
+- [ ] No free slot → `exit(2)`: a library killing the program, no destructors run, caller can't react. Read: exceptions. Also the comment says "doubles its size" — which is true?
+- [ ] `((*n)->data) == nullptr`: can an array's address ever be null?
 - [ ] `resize` to a **smaller** number while slots are in use: what should happen? Decide + document
 - [ ] `resize` error: `cerr` + `return` means the caller can't tell it failed. Read: exceptions (`std::length_error`)
 - [ ] Pool destroyed while Objects are still alive: what do their Node pointers point to? Decide + document
 - [ ] `friend class Object;` (line 31): at that point which `Object` does it name? Is it needed? Read: *nested classes* access rules
 
 ## Object
+- [ ] Move ops still use `objNode`, which no longer exists → compiles only because they're never instantiated. Test with `std::move`
 - [ ] `~Object` on a **moved-from** Object: `ptr` is `nullptr` → `ptr->~TType()` crashes. What should it do?
 - [ ] `std::move(other.ptr)` on a raw pointer: what does it actually do vs copying?
 - [ ] After ownership is fixed, check both move ops still make sense

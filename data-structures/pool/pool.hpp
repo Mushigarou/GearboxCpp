@@ -7,37 +7,17 @@
 #include <memory>
 
 // class templates, nested classes, variadic templates, perfect forwarding, placement new, alignment, RAII and move semantics
-
-/*
-- the Pool class is not templated, for ease of calling it 
-    without type definitions
-- the underlying object class would hold all complexity, and things
-    that user should not touch
-- the pool is like a wrapper around pool::object it provides to user
-    API to resize and acquire from pool
-- when Pool goes out of scope (RAII) all pool::object gotta call destructor
-    of all pool::object objects
-*/
 template<typename TType>
 class Pool {
 /* -------------------------------------------------------------------------- */
 /*                            Pool Private Members                            */
 /* -------------------------------------------------------------------------- */
 private:
-    /*
-    - this vector may actually be the pool, and number of object in it
-    and resize method would call it to resize it
-    */
-	friend class						Object;
-
 	struct Node {
         alignas(TType) unsigned char    data[sizeof(TType)];
         bool                            isFree = true;
     };
-
-    std::vector<std::unique_ptr<Node>>					poolArena;
-
-
+    std::vector<std::unique_ptr<Node>>  poolArena;
 /* -------------------------------------------------------------------------- */
 /*                            Pool Public Members                             */
 /* -------------------------------------------------------------------------- */
@@ -56,7 +36,14 @@ public:
             return;
         }
         this->poolArena.resize(numberOfObjectStored);
-        // std::cout << this->poolArena.capacity() << std::endl;
+        // int i = 0;
+        for (auto& pool: this->poolArena) {
+            if (pool == nullptr) {
+                pool = std::make_unique<Node>();
+                // i++;
+            }
+        }
+        // std::cout << "-->" << i << this->poolArena[0]->isFree << std::endl;
     }
     
     // Creates a Pool::Object containing
@@ -66,23 +53,23 @@ public:
 	*/
     template<typename ... TArgs>
     Object acquire(TArgs&&... p_args) {
-        std::vector<std::unique_ptr<Pool<TType>::Node>>& pool = this->poolArena;
-      
-        // if (pool.size() == pool.capacity()) {
-        //     const size_t capacity = pool.capacity() == 0 ? 4 : (pool.capacity() * 2);
-        //     pool.resize(capacity);
-        // }
-
-        size_t i = 0;
-        for (; i < pool.size(); i++) {
-            if (pool[i]) {
+        std::unique_ptr<Node>* n = nullptr;
+        // int i = 0;
+        for (std::unique_ptr<Node>& node: this->poolArena) {
+            if (node && node->isFree) {
+                n = &node;
+                node->isFree = false;
                 break;
             }
-            pool.push_back(std::make_unique<Node>());
+            // i++;
         }
-        
-        TType*	userObj = new (pool[i]->data) TType(std::forward<TArgs>(p_args)...);
-        return Object(pool[i], userObj);
+        // std::cout << i << std::endl;
+        if (n == nullptr || ((*n)->data) == nullptr) {
+            std::cerr  << __FILE__ << " " << __LINE__  << " : Error: not enough space. call resize." << std::endl;
+            exit(2);
+        }
+        TType*	userObj = new ((*n)->data) TType(std::forward<TArgs>(p_args)...);
+        return Object(userObj);
     }
 
 /* -------------------------------------------------------------------------- */
@@ -126,8 +113,7 @@ public:
 			friend class Pool<TType>;
 
 			TType   *ptr;
-			std::unique_ptr<Node>&	objNode;
-			Object(std::unique_ptr<Node>& objNode, TType *ptr): ptr(ptr), objNode(objNode) {}
+			Object(TType *ptr): ptr(ptr) {}
 
 /* -------------------------------------------------------------------------- */
 /*                           Object Public Members                            */
@@ -136,32 +122,14 @@ public:
 /* -------------------------------------------------------------------------- */
 /*                            Object Rule Of Five                             */
 /* -------------------------------------------------------------------------- */
-            /*
-            - the copy assignement should not be allowed to be called
-                because in destructor we call TType object destructor 
-            */
             Object(Object&  ) = delete;
             Object&   operator=(Object& ) = delete;
-            /*
-            - Every requests and releases of a pre-allocated objects must be
-                handled by Pool::Object, not by the user 
-            */
-		   /*
-		   - move operations would allow me to change ownership of an 
-			   object between pool and user without destructing Pool memory
-			   so it is ready for next object to acquire it 
-		   */
             Object(Object&& other) noexcept {
 				this->objNode = std::move(other.objNode);
 				this->ptr = std::move(other.ptr);
 				other.objNode = nullptr;
 				other.ptr = nullptr;
 			}
-            /*
-            - move operations would allow me to change ownership of an 
-                object between pool and user without destructing Pool memory
-                so it is ready for next object to acquire it 
-            */
             Object&   operator=(Object&& other) noexcept {
 				if (this != &other) {
 					this->objNode = std::move(other.objNode);
@@ -171,12 +139,6 @@ public:
 				}
 				return *this;
             }
-			/*
-			- i gotta called destructor of TType object explicitly (RAII)
-			- nullptr the raw ptr of this object
-			- i gotta update size of pool (decrease it)
-			- release the slot
-			*/
             ~Object(){
 				this->ptr->~TType();
 				// this->objNode->isFree = true;
